@@ -31,6 +31,27 @@ def build_report(baseline_usd: float, optimized_usd: float, levers: dict,
             f"- Carbon per query: {sustainability.get('carbon_g', 0):.3f} gCO2e",
             f"- Cheapest+cleanest region: {sustainability.get('best_region', 'n/a')}",
         ]
+    lines += [
+        "",
+        "## Extensions",
+        "",
+        "### Extension 2 — Right-sizing theo MBU",
+        "",
+        "M1 tính $/GB-VRAM và so sánh peak bandwidth để chọn GPU đủ VRAM cho workload memory-bound. "
+        "Các cơ hội đo được gồm H100 → MI300X tiết kiệm khoảng $0.55/GPU-giờ, "
+        "H100 → A100 tiết kiệm khoảng $0.71/GPU-giờ, và A10G → L4 tiết kiệm khoảng $0.20/GPU-giờ.",
+        "",
+        "### Extension 3 — cache_is_worth_it",
+        "",
+        "Với read discount 90% và chi phí ghi cache chuẩn hóa là 1.0, cache cần ít nhất 1.11 lần đọc lại để hòa vốn. "
+        "M2 dùng giả định 2.0 lần đọc lại, nên cache được bật trước khi tính chi phí optimized.",
+        "",
+        "## Recommendations",
+        "",
+        "1. Dùng spot + checkpoint cho workload có thể gián đoạn và reserved khi duty cycle ổn định trên 55%.",
+        "2. Theo dõi MFU, MBU, idle hours và $/1M-token thay vì chỉ dùng GPU-Util.",
+        "3. Bắt buộc tagging theo team/project và áp dụng cache policy theo break-even reads.",
+    ]
     lines += ["", "_Figures are June-2026 as-of snapshots; re-baseline before acting._"]
     return "\n".join(lines)
 

@@ -32,13 +32,52 @@ def run(verbose: bool = True) -> dict:
 
     summary = []
     for gid, a in agg.items():
+        gpu_type = a["type"]
+        current_catalog = cat[gpu_type]
         summary.append({
-            "gpu_id": gid, "gpu_type": a["type"],
+            "gpu_id": gid, "gpu_type": gpu_type,
             "gpu_util_pct": round(sum(a["util"]) / len(a["util"]), 1),
             "mfu": round(sum(a["mfu"]) / len(a["mfu"]), 3),
             "mbu": round(sum(a["mbu"]) / len(a["mbu"]), 3),
             "idle_hours": a["idle_hours"],
+            # Useful for comparing memory-bound inference hardware.
+            "usd_per_gb_vram": round(
+                num(current_catalog["on_demand_hr"]) / num(current_catalog["hbm_gb"]), 4
+            ),
         })
+
+    # Extension 2: right-size memory-bound workloads.  Preserve the observed
+    # bandwidth while targeting at most 60% MBU, and require equal VRAM so the
+    # recommendation does not silently reduce model capacity.
+    target_mbu = 0.60
+    right_sizing = []
+    for s in summary:
+        current = cat[s["gpu_type"]]
+        achieved_bw = s["mbu"] * num(current["peak_bw_tbs"])
+        required_peak_bw = achieved_bw / target_mbu if target_mbu else float("inf")
+        candidates = []
+        for candidate_type, candidate in cat.items():
+            if (
+                num(candidate["hbm_gb"]) >= num(current["hbm_gb"])
+                and num(candidate["peak_bw_tbs"]) >= required_peak_bw
+            ):
+                candidates.append((num(candidate["on_demand_hr"]), candidate_type, candidate))
+        candidates.sort(key=lambda x: (x[0], x[1]))
+        chosen = candidates[0] if candidates else (
+            num(current["on_demand_hr"]), s["gpu_type"], current
+        )
+        right_sizing.append({
+            "gpu_id": s["gpu_id"],
+            "current_gpu": s["gpu_type"],
+            "mbu": s["mbu"],
+            "achieved_bw_tbs": round(achieved_bw, 3),
+            "recommended_gpu": chosen[1],
+            "recommended_usd_hr": chosen[0],
+            "hourly_savings": round(max(0.0, num(current["on_demand_hr"]) - chosen[0]), 4),
+        })
+        s["right_size_gpu"] = chosen[1]
+
+    recommendations = [r for r in right_sizing if r["mbu"] < target_mbu and r["hourly_savings"] > 0]
 
     lies = metrics.flag_util_lies(summary)
     idle_waste = 0.0
@@ -53,8 +92,20 @@ def run(verbose: bool = True) -> dict:
             print(f"{s['gpu_id']:14}{s['gpu_type']:7}{s['gpu_util_pct']:>7}{s['mfu']:>7}{s['mbu']:>7}{s['idle_hours']:>8}")
         print(f"\nGPU-Util LIES (util>=90% but MFU<30%): {[l['gpu_id'] for l in lies]}")
         print(f"Idle waste (1 day): ${idle_waste:,.2f}  ->  ${idle_waste*30:,.0f}/month")
+        print("\nRight-sizing candidates (memory-bound, target MBU=60%):")
+        for r in recommendations:
+            print(
+                f"  {r['gpu_id']}: {r['current_gpu']} -> {r['recommended_gpu']} "
+                f"(${r['hourly_savings']:.2f}/GPU-hr saved)"
+            )
 
-    return {"summary": summary, "lies": lies, "idle_waste_daily": round(idle_waste, 2)}
+    return {
+        "summary": summary,
+        "lies": lies,
+        "idle_waste_daily": round(idle_waste, 2),
+        "right_sizing": right_sizing,
+        "right_sizing_savings": recommendations,
+    }
 
 
 if __name__ == "__main__":

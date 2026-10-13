@@ -52,6 +52,24 @@ def discount_stack(
     return cache_mult * batch_mult
 
 
+def cache_is_worth_it(
+    avg_cache_reads: float,
+    write_cost_per_m: float,
+    read_discount: float = 0.10,
+) -> bool:
+    """Return whether repeated cache reads recover the cache-write cost.
+
+    Costs are expressed relative to the same uncached price per million tokens.
+    Each read saves ``1 - read_discount`` of that price, so caching is useful
+    when the cumulative read savings exceed the one-time write cost.
+    """
+    reads = max(0.0, float(avg_cache_reads))
+    write_cost = max(0.0, float(write_cost_per_m))
+    discount = min(1.0, max(0.0, float(read_discount)))
+    savings_per_read = 1.0 - discount
+    return reads * savings_per_read >= write_cost
+
+
 def break_even_utilization(discount_frac: float) -> float:
     """Utilization at which a commitment pays off ~= 1 - discount.
 
